@@ -1,5 +1,20 @@
 struct SearchVideo
-  def to_xml(host_url, auto_generated, query_params, xml : XML::Builder)
+  include DB::Serializable
+
+  property title : String
+  property id : String
+  property author : String
+  property ucid : String
+  property published : Time
+  property views : Int64
+  property description_html : String
+  property length_seconds : Int32
+  property live_now : Bool
+  property paid : Bool
+  property premium : Bool
+  property premiere_timestamp : Time?
+
+  def to_xml(auto_generated, query_params, xml : XML::Builder)
     query_params["v"] = self.id
 
     xml.element("entry") do
@@ -7,22 +22,22 @@ struct SearchVideo
       xml.element("yt:videoId") { xml.text self.id }
       xml.element("yt:channelId") { xml.text self.ucid }
       xml.element("title") { xml.text self.title }
-      xml.element("link", rel: "alternate", href: "#{host_url}/watch?#{query_params}")
+      xml.element("link", rel: "alternate", href: "#{HOST_URL}/watch?#{query_params}")
 
       xml.element("author") do
         if auto_generated
           xml.element("name") { xml.text self.author }
-          xml.element("uri") { xml.text "#{host_url}/channel/#{self.ucid}" }
+          xml.element("uri") { xml.text "#{HOST_URL}/channel/#{self.ucid}" }
         else
           xml.element("name") { xml.text author }
-          xml.element("uri") { xml.text "#{host_url}/channel/#{ucid}" }
+          xml.element("uri") { xml.text "#{HOST_URL}/channel/#{ucid}" }
         end
       end
 
       xml.element("content", type: "xhtml") do
         xml.element("div", xmlns: "http://www.w3.org/1999/xhtml") do
-          xml.element("a", href: "#{host_url}/watch?#{query_params}") do
-            xml.element("img", src: "#{host_url}/vi/#{self.id}/mqdefault.jpg")
+          xml.element("a", href: "#{HOST_URL}/watch?#{query_params}") do
+            xml.element("img", src: "#{HOST_URL}/vi/#{self.id}/mqdefault.jpg")
           end
 
           xml.element("p", style: "word-break:break-word;white-space:pre-wrap") { xml.text html_to_content(self.description_html) }
@@ -33,7 +48,7 @@ struct SearchVideo
 
       xml.element("media:group") do
         xml.element("media:title") { xml.text self.title }
-        xml.element("media:thumbnail", url: "#{host_url}/vi/#{self.id}/mqdefault.jpg",
+        xml.element("media:thumbnail", url: "#{HOST_URL}/vi/#{self.id}/mqdefault.jpg",
           width: "320", height: "180")
         xml.element("media:description") { xml.text html_to_content(self.description_html) }
       end
@@ -44,17 +59,17 @@ struct SearchVideo
     end
   end
 
-  def to_xml(host_url, auto_generated, query_params, xml : XML::Builder | Nil = nil)
+  def to_xml(auto_generated, query_params, xml : XML::Builder | Nil = nil)
     if xml
-      to_xml(host_url, auto_generated, query_params, xml)
+      to_xml(HOST_URL, auto_generated, query_params, xml)
     else
       XML.build do |json|
-        to_xml(host_url, auto_generated, query_params, xml)
+        to_xml(HOST_URL, auto_generated, query_params, xml)
       end
     end
   end
 
-  def to_json(locale, config, kemal_config, json : JSON::Builder)
+  def to_json(locale, json : JSON::Builder)
     json.object do
       json.field "type", "video"
       json.field "title", self.title
@@ -65,7 +80,7 @@ struct SearchVideo
       json.field "authorUrl", "/channel/#{self.ucid}"
 
       json.field "videoThumbnails" do
-        generate_thumbnails(json, self.id, config, kemal_config)
+        generate_thumbnails(json, self.id)
       end
 
       json.field "description", html_to_content(self.description_html)
@@ -78,45 +93,49 @@ struct SearchVideo
       json.field "liveNow", self.live_now
       json.field "paid", self.paid
       json.field "premium", self.premium
-    end
-  end
+      json.field "isUpcoming", self.is_upcoming
 
-  def to_json(locale, config, kemal_config, json : JSON::Builder | Nil = nil)
-    if json
-      to_json(locale, config, kemal_config, json)
-    else
-      JSON.build do |json|
-        to_json(locale, config, kemal_config, json)
+      if self.premiere_timestamp
+        json.field "premiereTimestamp", self.premiere_timestamp.try &.to_unix
       end
     end
   end
 
-  db_mapping({
-    title:              String,
-    id:                 String,
-    author:             String,
-    ucid:               String,
-    published:          Time,
-    views:              Int64,
-    description_html:   String,
-    length_seconds:     Int32,
-    live_now:           Bool,
-    paid:               Bool,
-    premium:            Bool,
-    premiere_timestamp: Time?,
-  })
+  def to_json(locale, json : JSON::Builder | Nil = nil)
+    if json
+      to_json(locale, json)
+    else
+      JSON.build do |json|
+        to_json(locale, json)
+      end
+    end
+  end
+
+  def is_upcoming
+    premiere_timestamp ? true : false
+  end
 end
 
 struct SearchPlaylistVideo
-  db_mapping({
-    title:          String,
-    id:             String,
-    length_seconds: Int32,
-  })
+  include DB::Serializable
+
+  property title : String
+  property id : String
+  property length_seconds : Int32
 end
 
 struct SearchPlaylist
-  def to_json(locale, config, kemal_config, json : JSON::Builder)
+  include DB::Serializable
+
+  property title : String
+  property id : String
+  property author : String
+  property ucid : String
+  property video_count : Int32
+  property videos : Array(SearchPlaylistVideo)
+  property thumbnail : String?
+
+  def to_json(locale, json : JSON::Builder)
     json.object do
       json.field "type", "playlist"
       json.field "title", self.title
@@ -137,7 +156,7 @@ struct SearchPlaylist
               json.field "lengthSeconds", video.length_seconds
 
               json.field "videoThumbnails" do
-                generate_thumbnails(json, video.id, config, Kemal.config)
+                generate_thumbnails(json, video.id)
               end
             end
           end
@@ -146,29 +165,29 @@ struct SearchPlaylist
     end
   end
 
-  def to_json(locale, config, kemal_config, json : JSON::Builder | Nil = nil)
+  def to_json(locale, json : JSON::Builder | Nil = nil)
     if json
-      to_json(locale, config, kemal_config, json)
+      to_json(locale, json)
     else
       JSON.build do |json|
-        to_json(locale, config, kemal_config, json)
+        to_json(locale, json)
       end
     end
   end
-
-  db_mapping({
-    title:       String,
-    id:          String,
-    author:      String,
-    ucid:        String,
-    video_count: Int32,
-    videos:      Array(SearchPlaylistVideo),
-    thumbnail:   String?,
-  })
 end
 
 struct SearchChannel
-  def to_json(locale, config, kemal_config, json : JSON::Builder)
+  include DB::Serializable
+
+  property author : String
+  property ucid : String
+  property author_thumbnail : String
+  property subscriber_count : Int32
+  property video_count : Int32
+  property description_html : String
+  property auto_generated : Bool
+
+  def to_json(locale, json : JSON::Builder)
     json.object do
       json.field "type", "channel"
       json.field "author", self.author
@@ -198,92 +217,70 @@ struct SearchChannel
     end
   end
 
-  def to_json(locale, config, kemal_config, json : JSON::Builder | Nil = nil)
+  def to_json(locale, json : JSON::Builder | Nil = nil)
     if json
-      to_json(locale, config, kemal_config, json)
+      to_json(locale, json)
     else
       JSON.build do |json|
-        to_json(locale, config, kemal_config, json)
+        to_json(locale, json)
       end
     end
   end
-
-  db_mapping({
-    author:           String,
-    ucid:             String,
-    author_thumbnail: String,
-    subscriber_count: Int32,
-    video_count:      Int32,
-    description_html: String,
-    auto_generated:   Bool,
-  })
 end
 
 alias SearchItem = SearchVideo | SearchChannel | SearchPlaylist
 
 def channel_search(query, page, channel)
-  response = YT_POOL.client &.get("/channel/#{channel}?disable_polymer=1&hl=en&gl=US")
-  document = XML.parse_html(response.body)
-  canonical = document.xpath_node(%q(//link[@rel="canonical"]))
+  response = YT_POOL.client &.get("/channel/#{channel}")
 
-  if !canonical
-    response = YT_POOL.client &.get("/c/#{channel}?disable_polymer=1&hl=en&gl=US")
-    document = XML.parse_html(response.body)
-    canonical = document.xpath_node(%q(//link[@rel="canonical"]))
-  end
-
-  if !canonical
-    response = YT_POOL.client &.get("/user/#{channel}?disable_polymer=1&hl=en&gl=US")
-    document = XML.parse_html(response.body)
-    canonical = document.xpath_node(%q(//link[@rel="canonical"]))
-  end
-
-  if !canonical
-    return 0, [] of SearchItem
-  end
-
-  ucid = canonical["href"].split("/")[-1]
-
-  url = produce_channel_search_url(ucid, query, page)
-  response = YT_POOL.client &.get(url)
-  json = JSON.parse(response.body)
-
-  if json["content_html"]? && !json["content_html"].as_s.empty?
-    document = XML.parse_html(json["content_html"].as_s)
-    nodeset = document.xpath_nodes(%q(//li[contains(@class, "feed-item-container")]))
-
-    count = nodeset.size
-    items = extract_items(nodeset)
+  if response.status_code == 404
+    response = YT_POOL.client &.get("/user/#{channel}")
+    response = YT_POOL.client &.get("/c/#{channel}") if response.status_code == 404
+    initial_data = extract_initial_data(response.body)
+    ucid = initial_data["header"]["c4TabbedHeaderRenderer"]?.try &.["channelId"].as_s?
+    raise InfoException.new("Impossible to extract channel ID from page") if !ucid
   else
-    count = 0
-    items = [] of SearchItem
+    ucid = channel
   end
 
-  return count, items
+  continuation = produce_channel_search_continuation(ucid, query, page)
+  response_json = request_youtube_api_browse(continuation)
+
+  result = JSON.parse(response_json)
+  continuationItems = result["onResponseReceivedActions"]?
+    .try &.[0]["appendContinuationItemsAction"]["continuationItems"]
+
+  return 0, [] of SearchItem if !continuationItems
+
+  items = [] of SearchItem
+  continuationItems.as_a.select(&.as_h.has_key?("itemSectionRenderer")).each { |item|
+    extract_item(item["itemSectionRenderer"]["contents"].as_a[0])
+      .try { |t| items << t }
+  }
+
+  return items.size, items
 end
 
-def search(query, page = 1, search_params = produce_search_params(content_type: "all"), region = nil)
-  if query.empty?
-    return {0, [] of SearchItem}
-  end
+def search(query, search_params = produce_search_params(content_type: "all"), region = nil)
+  return 0, [] of SearchItem if query.empty?
 
-  html = YT_POOL.client(region, &.get("/results?q=#{URI.encode_www_form(query)}&page=#{page}&sp=#{search_params}&hl=en&disable_polymer=1").body)
-  if html.empty?
-    return {0, [] of SearchItem}
-  end
+  body = YT_POOL.client(region, &.get("/results?search_query=#{URI.encode_www_form(query)}&sp=#{search_params}&hl=en").body)
+  return 0, [] of SearchItem if body.empty?
 
-  html = XML.parse_html(html)
-  nodeset = html.xpath_nodes(%q(//ol[@class="item-section"]/li))
-  items = extract_items(nodeset)
+  initial_data = extract_initial_data(body)
+  items = extract_items(initial_data)
 
-  return {nodeset.size, items}
+  # initial_data["estimatedResults"]?.try &.as_s.to_i64
+
+  return items.size, items
 end
 
-def produce_search_params(sort : String = "relevance", date : String = "", content_type : String = "",
+def produce_search_params(page = 1, sort : String = "relevance", date : String = "", content_type : String = "",
                           duration : String = "", features : Array(String) = [] of String)
   object = {
     "1:varint"   => 0_i64,
     "2:embedded" => {} of String => Int64,
+    "9:varint"   => ((page - 1) * 20).to_i64,
   }
 
   case sort
@@ -310,6 +307,7 @@ def produce_search_params(sort : String = "relevance", date : String = "", conte
     object["2:embedded"].as(Hash)["1:varint"] = 4_i64
   when "year"
     object["2:embedded"].as(Hash)["1:varint"] = 5_i64
+  else nil # Ignore
   end
 
   case content_type
@@ -334,6 +332,7 @@ def produce_search_params(sort : String = "relevance", date : String = "", conte
     object["2:embedded"].as(Hash)["3:varint"] = 1_i64
   when "long"
     object["2:embedded"].as(Hash)["3:varint"] = 2_i64
+  else nil # Ignore
   end
 
   features.each do |feature|
@@ -358,6 +357,7 @@ def produce_search_params(sort : String = "relevance", date : String = "", conte
       object["2:embedded"].as(Hash)["23:varint"] = 1_i64
     when "hdr"
       object["2:embedded"].as(Hash)["25:varint"] = 1_i64
+    else nil # Ignore
     end
   end
 
@@ -373,20 +373,28 @@ def produce_search_params(sort : String = "relevance", date : String = "", conte
   return params
 end
 
-def produce_channel_search_url(ucid, query, page)
+def produce_channel_search_continuation(ucid, query, page)
+  if page <= 1
+    idx = 0_i64
+  else
+    idx = 30_i64 * (page - 1)
+  end
+
   object = {
     "80226972:embedded" => {
       "2:string" => ucid,
       "3:base64" => {
         "2:string"  => "search",
-        "6:varint"  => 2_i64,
+        "6:varint"  => 1_i64,
         "7:varint"  => 1_i64,
         "12:varint" => 1_i64,
-        "13:string" => "",
+        "15:base64" => {
+          "3:varint" => idx,
+        },
         "23:varint" => 0_i64,
-        "15:string" => "#{page}",
       },
       "11:string" => query,
+      "35:string" => "browse-feed#{ucid}search",
     },
   }
 
@@ -395,7 +403,7 @@ def produce_channel_search_url(ucid, query, page)
     .try { |i| Base64.urlsafe_encode(i) }
     .try { |i| URI.encode_www_form(i) }
 
-  return "/browse_ajax?continuation=#{continuation}&gl=US&hl=en"
+  return continuation
 end
 
 def process_search_query(query, page, user, region)
@@ -455,11 +463,11 @@ def process_search_query(query, page, user, region)
       count = 0
     end
   else
-    search_params = produce_search_params(sort: sort, date: date, content_type: content_type,
+    search_params = produce_search_params(page: page, sort: sort, date: date, content_type: content_type,
       duration: duration, features: features)
 
-    count, items = search(search_query, page, search_params, region).as(Tuple)
+    count, items = search(search_query, search_params, region).as(Tuple)
   end
 
-  {search_query, count, items}
+  {search_query, count, items, operators}
 end

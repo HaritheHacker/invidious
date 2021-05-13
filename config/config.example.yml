@@ -1,0 +1,13 @@
+channel_threads: 1
+feed_threads: 1
+db:
+  user: kemal
+  password: kemal
+  host: localhost
+  port: 5432
+  dbname: invidious
+# alternatively, the database URL can be provided directly - if both are set then the latter takes precedence
+# database_url: postgres://kemal:kemal@localhost:5432/invidious
+full_refresh: false
+https_only: false
+domain:

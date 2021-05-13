@@ -1,3 +1,6 @@
+var player_data = JSON.parse(document.getElementById('player_data').innerHTML);
+var video_data = JSON.parse(document.getElementById('video_data').innerHTML);
+
 var options = {
     preload: 'auto',
     liveui: true,
@@ -11,11 +14,18 @@ var options = {
             'durationDisplay',
             'progressControl',
             'remainingTimeDisplay',
+            'Spacer',
             'captionsButton',
             'qualitySelector',
             'playbackRateMenuButton',
             'fullscreenToggle'
         ]
+    },
+    html5: {
+        preloadTextTracks: false,
+        hls: {
+            overrideNative: true
+        }
     }
 }
 
@@ -35,10 +45,18 @@ var shareOptions = {
     title: player_data.title,
     description: player_data.description,
     image: player_data.thumbnail,
-    embedCode: "<iframe id='ivplayer' type='text/html' width='640' height='360' src='" + embed_url + "' style='border:none;'></iframe>"
+    embedCode: "<iframe id='ivplayer' width='640' height='360' src='" + embed_url + "' style='border:none;'></iframe>"
 }
 
+videojs.Hls.xhr.beforeRequest = function(options) {
+    if (options.uri.indexOf('videoplayback') === -1 && options.uri.indexOf('local=true') === -1) {
+        options.uri = options.uri + '?local=true';
+    }
+    return options;
+};
+
 var player = videojs('player', options);
+
 
 if (location.pathname.startsWith('/embed/')) {
     player.overlay({
@@ -56,9 +74,58 @@ if (location.pathname.startsWith('/embed/')) {
     });
 }
 
+// Detect mobile users and initalize mobileUi for better UX
+// Detection code taken from https://stackoverflow.com/a/20293441
+
+function isMobile() {
+  try{ document.createEvent("TouchEvent"); return true; }
+  catch(e){ return false; }
+}
+
+if (isMobile()) {
+    player.mobileUi();
+
+    buttons = ["playToggle", "volumePanel", "captionsButton"];
+
+    if (video_data.params.quality !== 'dash') {
+        buttons.push("qualitySelector")
+    }
+
+    // Create new control bar object for operation buttons
+    const ControlBar = videojs.getComponent("controlBar");
+    let operations_bar = new ControlBar(player, {
+      children: [],
+      playbackRates: [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    });
+    buttons.slice(1).forEach(child => operations_bar.addChild(child))
+
+    // Remove operation buttons from primary control bar
+    primary_control_bar = player.getChild("controlBar");
+    buttons.forEach(child => primary_control_bar.removeChild(child));
+
+    operations_bar_element = operations_bar.el();
+    operations_bar_element.className += " mobile-operations-bar"
+    player.addChild(operations_bar)
+
+    // Playback menu doesn't work when its initalized outside of the primary control bar
+    playback_element = document.getElementsByClassName("vjs-playback-rate")[0]
+    operations_bar_element.append(playback_element)
+
+    // The share and http source selector element can't be fetched till the players ready.
+    player.one("playing", () => {
+  	    share_element = document.getElementsByClassName("vjs-share-control")[0]
+  	    operations_bar_element.append(share_element)
+
+  	    if (video_data.params.quality === 'dash') {
+        		http_source_selector = document.getElementsByClassName("vjs-http-source-selector vjs-menu-button")[0]
+        		operations_bar_element.append(http_source_selector)
+  	    }
+  	})
+}
+
 player.on('error', function (event) {
     if (player.error().code === 2 || player.error().code === 4) {
-        setInterval(setTimeout(function (event) {
+        setTimeout(function (event) {
             console.log('An error occured in the player, reloading...');
 
             var currentTime = player.currentTime();
@@ -77,7 +144,7 @@ player.on('error', function (event) {
             if (!paused) {
                 player.play();
             }
-        }, 5000), 5000);
+        }, 5000);
     }
 });
 
@@ -143,10 +210,40 @@ if (video_data.params.autoplay) {
 
 if (!video_data.params.listen && video_data.params.quality === 'dash') {
     player.httpSourceSelector();
+
+    if (video_data.params.quality_dash != "auto") {
+        player.ready(() => {
+            player.on("loadedmetadata", () => {
+                const qualityLevels = Array.from(player.qualityLevels()).sort((a, b) => a.height - b.height);
+                let targetQualityLevel;
+                switch (video_data.params.quality_dash) {
+                    case "best":
+                        targetQualityLevel = qualityLevels.length - 1;
+                        break;
+                    case "worst":
+                        targetQualityLevel = 0;
+                        break;
+                    default:
+                        const targetHeight = Number.parseInt(video_data.params.quality_dash, 10);
+                        for (let i = 0; i < qualityLevels.length; i++) {
+                            if (qualityLevels[i].height <= targetHeight) {
+                                targetQualityLevel = i;
+                            } else {
+                                break;
+                            }
+                        }
+                }
+                for (let i = 0; i < qualityLevels.length; i++) {
+                    qualityLevels[i].enabled = (i == targetQualityLevel);
+                }
+            });
+        });
+    }
 }
 
 player.vttThumbnails({
-    src: location.origin + '/api/v1/storyboards/' + video_data.id + '?height=90'
+    src: location.origin + '/api/v1/storyboards/' + video_data.id + '?height=90',
+    showTimestamp: true
 });
 
 // Enable annotations
@@ -228,11 +325,24 @@ function set_time_percent(percent) {
     player.currentTime(newTime);
 }
 
+function play() {
+    player.play();
+}
+
+function pause() {
+    player.pause();
+}
+
+function stop() {
+    player.pause();
+    player.currentTime(0);
+}
+
 function toggle_play() {
     if (player.paused()) {
-        player.play();
+        play();
     } else {
-        player.pause();
+        pause();
     }
 }
 
@@ -338,7 +448,20 @@ window.addEventListener('keydown', e => {
     switch (decoratedKey) {
         case ' ':
         case 'k':
+        case 'MediaPlayPause':
             action = toggle_play;
+            break;
+
+        case 'MediaPlay':
+            action = play;
+            break;
+
+        case 'MediaPause':
+            action = pause;
+            break;
+
+        case 'MediaStop':
+            action = stop;
             break;
 
         case 'ArrowUp':
@@ -357,16 +480,18 @@ window.addEventListener('keydown', e => {
             break;
 
         case 'ArrowRight':
-            action = skip_seconds.bind(this, 5);
+        case 'MediaFastForward':
+            action = skip_seconds.bind(this, 5 * player.playbackRate());
             break;
         case 'ArrowLeft':
-            action = skip_seconds.bind(this, -5);
+        case 'MediaTrackPrevious':
+            action = skip_seconds.bind(this, -5 * player.playbackRate());
             break;
         case 'l':
-            action = skip_seconds.bind(this, 10);
+            action = skip_seconds.bind(this, 10 * player.playbackRate());
             break;
         case 'j':
-            action = skip_seconds.bind(this, -10);
+            action = skip_seconds.bind(this, -10 * player.playbackRate());
             break;
 
         case '0':
@@ -391,9 +516,11 @@ window.addEventListener('keydown', e => {
             break;
 
         case 'N':
+        case 'MediaTrackNext':
             action = next_video;
             break;
         case 'P':
+        case 'MediaTrackPrevious':
             // TODO: Add support to play back previous video.
             break;
 
@@ -468,4 +595,41 @@ window.addEventListener('keydown', e => {
 }());
 
 // Since videojs-share can sometimes be blocked, we defer it until last
-player.share(shareOptions);
+if (player.share) {
+    player.share(shareOptions);
+}
+
+// show the preferred caption by default
+if (player_data.preferred_caption_found) {
+    player.ready(() => {
+        player.textTracks()[1].mode = 'showing';
+    });
+}
+
+// Safari audio double duration fix
+if (navigator.vendor == "Apple Computer, Inc." && video_data.params.listen) {
+    player.on('loadedmetadata', function () {
+        player.on('timeupdate', function () {
+            if (player.remainingTime() < player.duration() / 2) {
+                player.currentTime(player.duration() + 1);
+            }
+        });
+    });
+}
+
+// Watch on Invidious link
+if (window.location.pathname.startsWith("/embed/")) {
+    const Button = videojs.getComponent('Button');
+    let watch_on_invidious_button = new Button(player);
+
+    // Create hyperlink for current instance
+    redirect_element = document.createElement("a");
+    redirect_element.setAttribute("href", `http://${window.location.host}/watch?v=${window.location.pathname.replace("/embed/","")}`)
+    redirect_element.appendChild(document.createTextNode("Invidious"))
+
+    watch_on_invidious_button.el().appendChild(redirect_element)
+    watch_on_invidious_button.addClass("watch-on-invidious")
+
+    cb = player.getChild('ControlBar')
+    cb.addChild(watch_on_invidious_button)
+};

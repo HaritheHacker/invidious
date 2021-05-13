@@ -1,13 +1,16 @@
 {
     "`x` subscribers": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 個訂閱者",
-        "": "`x` 個訂閱者。"
+        "": "`x` 個訂閱者"
     },
     "`x` videos": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 部影片",
-        "": "`x` 部影片。"
+        "": "`x` 部影片"
     },
-    "`x` playlists": "`x` 播放清單",
+    "`x` playlists": {
+        "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 播放清單",
+        "": "`x` 播放清單。"
+    },
     "LIVE": "直播",
     "Shared `x` ago": "`x` 前分享",
     "Unsubscribe": "取消訂閱",
@@ -74,6 +77,7 @@
     "Fallback captions: ": "汰退字幕： ",
     "Show related videos: ": "顯示相關的影片： ",
     "Show annotations by default: ": "預設顯示註釋： ",
+    "Automatically extend video description: ": "",
     "Visual preferences": "視覺偏好設定",
     "Player style: ": "播放器樣式： ",
     "Dark mode: ": "深色模式： ",
@@ -121,11 +125,11 @@
     "Token": "Token",
     "`x` subscriptions": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 個訂閱",
-        "": "`x` 個訂閱。"
+        "": "`x` 個訂閱"
     },
     "`x` tokens": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` token",
-        "": "`x` tokens。"
+        "": "`x` 個存取金鑰"
     },
     "Import/export": "匯入／匯出",
     "unsubscribe": "取消訂閱",
@@ -133,7 +137,7 @@
     "Subscriptions": "訂閱",
     "`x` unseen notifications": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 個未讀的通知",
-        "": "`x` 個未讀的通知。"
+        "": "`x` 個未讀的通知"
     },
     "search": "搜尋",
     "Log out": "登出",
@@ -153,6 +157,8 @@
     "Title": "標題",
     "Playlist privacy": "播放清單隱私",
     "Editing playlist `x`": "已編輯播放清單 `x`",
+    "Show more": "",
+    "Show less": "",
     "Watch on YouTube": "在 YouTube 上觀看",
     "Hide annotations": "隱藏註釋",
     "Show annotations": "顯示註釋",
@@ -166,14 +172,17 @@
     "Shared `x`": "`x` 發佈",
     "`x` views": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 次檢視",
-        "": "`x` 次檢視。"
+        "": "`x` 次檢視"
     },
     "Premieres in `x`": "首映於 `x`",
     "Premieres `x`": "首映於 `x`",
     "Hi! Looks like you have JavaScript turned off. Click here to view comments, keep in mind they may take a bit longer to load.": "嗨！看來您將 JavaScript 關閉了。點擊這裡以檢視留言，請注意，它們可能需要比較長的時間載入。",
     "View YouTube comments": "檢視 YouTube 留言",
     "View more comments on Reddit": "在 Reddit 上檢視更多留言",
-    "View `x` comments": "檢視 `x` 則留言",
+    "View `x` comments": {
+        "([^.,0-9]|^)1([^.,0-9]|$)": "檢視 `x` 則留言",
+        "": "檢視 `x` 則留言。"
+    },
     "View Reddit comments": "檢視 Reddit 留言",
     "Hide replies": "隱藏回覆",
     "Show replies": "顯示回覆",
@@ -200,13 +209,13 @@
     "Could not fetch comments": "無法擷取留言",
     "View `x` replies": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "檢視 `x` 則回覆",
-        "": "檢視 `x` 則回覆。"
+        "": "檢視 `x` 則回覆"
     },
     "`x` ago": "`x` 以前",
     "Load more": "載入更多",
     "`x` points": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 點",
-        "": "`x` 點。"
+        "": "`x` 點"
     },
     "Could not create mix.": "無法建立混合。",
     "Empty playlist": "空的播放清單",
@@ -327,34 +336,35 @@
     "Zulu": "祖魯語",
     "`x` years": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 年",
-        "": "`x` 年。"
+        "": "`x` 年"
     },
     "`x` months": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 月",
-        "": "`x` 月。"
+        "": "`x` 月"
     },
     "`x` weeks": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 週",
-        "": "`x` 週。"
+        "": "`x` 週"
     },
     "`x` days": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 天",
-        "": "`x` 天。"
+        "": "`x` 天"
     },
     "`x` hours": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 小時",
-        "": "`x` 小時。"
+        "": "`x` 小時"
     },
     "`x` minutes": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 天",
-        "": "`x` 分鐘。"
+        "": "`x` 分鐘"
     },
     "`x` seconds": {
         "([^.,0-9]|^)1([^.,0-9]|$)": "`x` 秒",
-        "": "`x` 秒。"
+        "": "`x` 秒"
     },
     "Fallback comments: ": "汰退留言： ",
     "Popular": "熱門頻道",
+    "Search": "搜尋",
     "Top": "熱門影片",
     "About": "關於",
     "Rating: ": "評分： ",
@@ -377,5 +387,32 @@
     "Videos": "影片",
     "Playlists": "播放清單",
     "Community": "社群",
+    "relevance": "關聯",
+    "rating": "評分",
+    "date": "日期",
+    "views": "檢視",
+    "content_type": "內容類型",
+    "duration": "時長",
+    "features": "特色",
+    "sort": "排序",
+    "hour": "小時",
+    "today": "今天",
+    "week": "週",
+    "month": "月",
+    "year": "年",
+    "video": "影片",
+    "channel": "頻道",
+    "playlist": "播放清單",
+    "movie": "電影",
+    "show": "秀",
+    "hd": "HD",
+    "subtitles": "字幕",
+    "creative_commons": "創用 CC",
+    "3d": "3D",
+    "live": "直播",
+    "4k": "4K",
+    "location": "位置",
+    "hdr": "HDR",
+    "filter": "篩選條件",
     "Current version: ": "目前版本： "
 }

@@ -1,3 +1,5 @@
+var video_data = JSON.parse(document.getElementById('video_data').innerHTML);
+
 String.prototype.supplant = function (o) {
     return this.replace(/{([^{}]*)}/g, function (a, b) {
         var r = o[b];
@@ -152,6 +154,11 @@ function get_playlist(plid, retries) {
                     player.on('ended', function () {
                         var url = new URL('https://example.com/watch?v=' + xhr.response.nextVideo);
 
+                        url.searchParams.set('list', plid);
+                        if (!plid.startsWith('RD')) {
+                            url.searchParams.set('index', xhr.response.index);
+                        }
+
                         if (video_data.params.autoplay || video_data.params.continue_autoplay) {
                             url.searchParams.set('autoplay', '1');
                         }
@@ -168,10 +175,6 @@ function get_playlist(plid, retries) {
                             url.searchParams.set('local', video_data.params.local);
                         }
 
-                        url.searchParams.set('list', plid);
-                        if (!plid.startsWith('RD')) {
-                            url.searchParams.set('index', xhr.response.index);
-                        }
                         location.assign(url.pathname + url.search);
                     });
                 }
@@ -269,7 +272,7 @@ function get_reddit_comments(retries) {
 
     xhr.onerror = function () {
         console.log('Pulling comments failed... ' + retries + '/5');
-        setInterval(function () { get_reddit_comments(retries - 1) }, 1000);
+        setTimeout(function () { get_reddit_comments(retries - 1) }, 1000);
     }
 
     xhr.ontimeout = function () {
@@ -343,7 +346,7 @@ function get_youtube_comments(retries) {
         comments.innerHTML =
             '<h3 style="text-align:center"><div class="loading"><i class="icon ion-ios-refresh"></i></div></h3>';
         console.log('Pulling comments failed... ' + retries + '/5');
-        setInterval(function () { get_youtube_comments(retries - 1) }, 1000);
+        setTimeout(function () { get_youtube_comments(retries - 1) }, 1000);
     }
 
     xhr.ontimeout = function () {
@@ -356,7 +359,7 @@ function get_youtube_comments(retries) {
     xhr.send();
 }
 
-function get_youtube_replies(target, load_more) {
+function get_youtube_replies(target, load_more, load_replies) {
     var continuation = target.getAttribute('data-continuation');
 
     var body = target.parentNode.parentNode;
@@ -368,7 +371,10 @@ function get_youtube_replies(target, load_more) {
         '?format=html' +
         '&hl=' + video_data.preferences.locale +
         '&thin_mode=' + video_data.preferences.thin_mode +
-        '&continuation=' + continuation;
+        '&continuation=' + continuation
+    if (load_replies) {
+        url += '&action=action_get_comment_replies';
+    }
     var xhr = new XMLHttpRequest();
     xhr.responseType = 'json';
     xhr.timeout = 10000;

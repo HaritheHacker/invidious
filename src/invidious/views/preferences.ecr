@@ -2,12 +2,6 @@
 <title><%= translate(locale, "Preferences") %> - Invidious</title>
 <% end %>
 
-<script>
-function update_value(element) {
-    document.getElementById('volume-value').innerText = element.value;
-}
-</script>
-
 <div class="h-box">
     <form class="pure-form pure-form-aligned" action="/preferences?referer=<%= URI.encode_www_form(referer) %>" method="post">
         <fieldset>
@@ -63,9 +57,20 @@ function update_value(element) {
                 </select>
             </div>
 
+            <% if !CONFIG.disabled?("dash") %>
+                <div class="pure-control-group">
+                    <label for="quality_dash"><%= translate(locale, "Preferred dash video quality: ") %></label>
+                    <select name="quality_dash" id="quality_dash">
+                        <% {"auto", "best", "4320p", "2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p", "worst"}.each do |option| %>
+                            <option value="<%= option %>" <% if preferences.quality_dash == option %> selected <% end %>><%= translate(locale, option) %></option>
+                        <% end %>
+                    </select>
+                </div>
+            <% end %>
+
             <div class="pure-control-group">
                 <label for="volume"><%= translate(locale, "Player volume: ") %></label>
-                <input name="volume" id="volume" oninput="update_value(this);" type="range" min="0" max="100" step="5" value="<%= preferences.volume %>">
+                <input name="volume" id="volume" data-onrange="update_volume_value" type="range" min="0" max="100" step="5" value="<%= preferences.volume %>">
                 <span class="pure-form-message-inline" id="volume-value"><%= preferences.volume %></span>
             </div>
 
@@ -74,7 +79,7 @@ function update_value(element) {
                 <% preferences.comments.each_with_index do |comments, index| %>
                     <select name="comments[<%= index %>]" id="comments[<%= index %>]">
                         <% {"", "youtube", "reddit"}.each do |option| %>
-                            <option value="<%= option %>" <% if preferences.comments[index] == option %> selected <% end %>><%= translate(locale, option) %></option>
+                            <option value="<%= option %>" <% if preferences.comments[index] == option %> selected <% end %>><%= translate(locale, option.blank? ? "none" : option) %></option>
                         <% end %>
                     </select>
                 <% end %>
@@ -85,7 +90,7 @@ function update_value(element) {
                 <% preferences.captions.each_with_index do |caption, index| %>
                     <select class="pure-u-1-6" name="captions[<%= index %>]" id="captions[<%= index %>]">
                         <% CAPTION_LANGUAGES.each do |option| %>
-                            <option value="<%= option %>" <% if preferences.captions[index] == option %> selected <% end %>><%= translate(locale, option) %></option>
+                            <option value="<%= option %>" <% if preferences.captions[index] == option %> selected <% end %>><%= translate(locale, option.blank? ? "none" : option) %></option>
                         <% end %>
                     </select>
                 <% end %>
@@ -100,6 +105,12 @@ function update_value(element) {
                 <label for="annotations"><%= translate(locale, "Show annotations by default: ") %></label>
                 <input name="annotations" id="annotations" type="checkbox" <% if preferences.annotations %>checked<% end %>>
             </div>
+
+            <div class="pure-control-group">
+                <label for="extend_desc"><%= translate(locale, "Automatically extend video description: ") %></label>
+                <input name="extend_desc" id="extend_desc" type="checkbox" <% if preferences.extend_desc %>checked<% end %>>
+            </div>
+
 
             <legend><%= translate(locale, "Visual preferences") %></legend>
 
@@ -125,7 +136,7 @@ function update_value(element) {
                 <label for="dark_mode"><%= translate(locale, "Theme: ") %></label>
                 <select name="dark_mode" id="dark_mode">
                     <% {"", "light", "dark"}.each do |option| %>
-                        <option value="<%= option %>" <% if preferences.dark_mode == option %> selected <% end %>><%= translate(locale, option) %></option>
+                        <option value="<%= option %>" <% if preferences.dark_mode == option %> selected <% end %>><%= translate(locale, option.blank? ? "auto" : option) %></option>
                     <% end %>
                 </select>
             </div>
@@ -136,16 +147,16 @@ function update_value(element) {
             </div>
 
             <% if env.get?("user") %>
-                <% feed_options = {"", "Popular", "Top", "Trending", "Subscriptions", "Playlists"} %>
+                <% feed_options = {"", "Popular", "Trending", "Subscriptions", "Playlists"} %>
             <% else %>
-                <% feed_options = {"", "Popular", "Top", "Trending"} %>
+                <% feed_options = {"", "Popular", "Trending"} %>
             <% end %>
 
             <div class="pure-control-group">
                 <label for="default_home"><%= translate(locale, "Default homepage: ") %></label>
                 <select name="default_home" id="default_home">
                     <% feed_options.each do |option| %>
-                        <option value="<%= option %>" <% if preferences.default_home == option %> selected <% end %>><%= translate(locale, option) %></option>
+                        <option value="<%= option %>" <% if preferences.default_home == option %> selected <% end %>><%= translate(locale, option.blank? ? "Search" : option) %></option>
                     <% end %>
                 </select>
             </div>
@@ -155,7 +166,7 @@ function update_value(element) {
                 <% (feed_options.size - 1).times do |index| %>
                     <select name="feed_menu[<%= index %>]" id="feed_menu[<%= index %>]">
                         <% feed_options.each do |option| %>
-                            <option value="<%= option %>" <% if preferences.feed_menu[index]? == option %> selected <% end %>><%= translate(locale, option) %></option>
+                            <option value="<%= option %>" <% if preferences.feed_menu[index]? == option %> selected <% end %>><%= translate(locale, option.blank? ? "Search" : option) %></option>
                         <% end %>
                     </select>
                 <% end %>
@@ -203,21 +214,21 @@ function update_value(element) {
                 </div>
 
                 <% # Web notifications are only supported over HTTPS %>
-                <% if Kemal.config.ssl || config.https_only %>
+                <% if Kemal.config.ssl || CONFIG.https_only %>
                     <div class="pure-control-group">
-                        <a href="#" onclick="Notification.requestPermission()"><%= translate(locale, "Enable web notifications") %></a>
+                        <a href="#" data-onclick="notification_requestPermission"><%= translate(locale, "Enable web notifications") %></a>
                     </div>
                 <% end %>
             <% end %>
 
-            <% if env.get?("user") && config.admins.includes? env.get?("user").as(User).email %>
+            <% if env.get?("user") && CONFIG.admins.includes? env.get?("user").as(User).email %>
                 <legend><%= translate(locale, "Administrator preferences") %></legend>
 
                 <div class="pure-control-group">
                     <label for="admin_default_home"><%= translate(locale, "Default homepage: ") %></label>
                     <select name="admin_default_home" id="admin_default_home">
                         <% feed_options.each do |option| %>
-                            <option value="<%= option %>" <% if CONFIG.default_user_preferences.default_home == option %> selected <% end %>><%= translate(locale, option) %></option>
+                            <option value="<%= option %>" <% if CONFIG.default_user_preferences.default_home == option %> selected <% end %>><%= translate(locale, option.blank? ? "none" : option) %></option>
                         <% end %>
                     </select>
                 </div>
@@ -227,35 +238,36 @@ function update_value(element) {
                     <% (feed_options.size - 1).times do |index| %>
                         <select name="admin_feed_menu[<%= index %>]" id="admin_feed_menu[<%= index %>]">
                             <% feed_options.each do |option| %>
-                                <option value="<%= option %>" <% if CONFIG.default_user_preferences.feed_menu[index]? == option %> selected <% end %>><%= translate(locale, option) %></option>
+                                <option value="<%= option %>" <% if CONFIG.default_user_preferences.feed_menu[index]? == option %> selected <% end %>><%= translate(locale, option.blank? ? "none" : option) %></option>
                             <% end %>
                         </select>
                     <% end %>
                 </div>
 
                 <div class="pure-control-group">
-                    <label for="top_enabled"><%= translate(locale, "Top enabled: ") %></label>
-                    <input name="top_enabled" id="top_enabled" type="checkbox" <% if config.top_enabled %>checked<% end %>>
+                    <label for="popular_enabled"><%= translate(locale, "Popular enabled: ") %></label>
+                    <input name="popular_enabled" id="popular_enabled" type="checkbox" <% if CONFIG.popular_enabled %>checked<% end %>>
                 </div>
+
 
                 <div class="pure-control-group">
                     <label for="captcha_enabled"><%= translate(locale, "CAPTCHA enabled: ") %></label>
-                    <input name="captcha_enabled" id="captcha_enabled" type="checkbox" <% if config.captcha_enabled %>checked<% end %>>
+                    <input name="captcha_enabled" id="captcha_enabled" type="checkbox" <% if CONFIG.captcha_enabled %>checked<% end %>>
                 </div>
 
                 <div class="pure-control-group">
                     <label for="login_enabled"><%= translate(locale, "Login enabled: ") %></label>
-                    <input name="login_enabled" id="login_enabled" type="checkbox" <% if config.login_enabled %>checked<% end %>>
+                    <input name="login_enabled" id="login_enabled" type="checkbox" <% if CONFIG.login_enabled %>checked<% end %>>
                 </div>
 
                 <div class="pure-control-group">
                     <label for="registration_enabled"><%= translate(locale, "Registration enabled: ") %></label>
-                    <input name="registration_enabled" id="registration_enabled" type="checkbox" <% if config.registration_enabled %>checked<% end %>>
+                    <input name="registration_enabled" id="registration_enabled" type="checkbox" <% if CONFIG.registration_enabled %>checked<% end %>>
                 </div>
 
                 <div class="pure-control-group">
                     <label for="statistics_enabled"><%= translate(locale, "Report statistics: ") %></label>
-                    <input name="statistics_enabled" id="statistics_enabled" type="checkbox" <% if config.statistics_enabled %>checked<% end %>>
+                    <input name="statistics_enabled" id="statistics_enabled" type="checkbox" <% if CONFIG.statistics_enabled %>checked<% end %>>
                 </div>
             <% end %>
 

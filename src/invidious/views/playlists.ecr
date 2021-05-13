@@ -4,7 +4,7 @@
 
 <% if channel.banner %>
     <div class="h-box">
-        <img style="width:100%" src="/ggpht<%= URI.parse(channel.banner.not_nil!.gsub("=w1060-", "=w1280-")).full_path %>">
+        <img style="width:100%" src="/ggpht<%= URI.parse(channel.banner.not_nil!.gsub("=w1060-", "=w1280-")).request_target %>">
     </div>
 
     <div class="h-box">
@@ -15,7 +15,7 @@
 <div class="pure-g h-box">
     <div class="pure-u-2-3">
         <div class="channel-profile">
-            <img src="/ggpht<%= URI.parse(channel.author_thumbnail).full_path %>">
+            <img src="/ggpht<%= URI.parse(channel.author_thumbnail).request_target %>">
             <span><%= channel.author %></span>
         </div>
     </div>
@@ -27,7 +27,7 @@
 </div>
 
 <div class="h-box">
-    <p><span style="white-space:pre-wrap"><%= XML.parse_html(channel.description_html).xpath_node(%q(.//pre)).try &.content %></span></p>
+    <p><span style="white-space:pre-wrap"><%= XML.parse_html(channel.description_html).xpath_node(%q(.//pre)).try &.content if !channel.description_html.empty? %></span></p>
 </div>
 
 <div class="h-box">
@@ -90,7 +90,7 @@
     <div class="pure-u-1 pure-u-md-4-5"></div>
     <div class="pure-u-1 pure-u-lg-1-5" style="text-align:right">
         <% if continuation %>
-            <a href="/channel/<%= channel.ucid %>/playlists?continuation=<%= continuation %><% if sort_by != "last" %>&sort_by=<%= sort_by %><% end %>">
+            <a href="/channel/<%= channel.ucid %>/playlists?continuation=<%= continuation %><% if sort_by != "last" %>&sort_by=<%= HTML.escape(sort_by) %><% end %>">
                 <%= translate(locale, "Next page") %>
             </a>
         <% end %>

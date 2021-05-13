@@ -1,11 +1,23 @@
 class RedditThing
-  JSON.mapping({
-    kind: String,
-    data: RedditComment | RedditLink | RedditMore | RedditListing,
-  })
+  include JSON::Serializable
+
+  property kind : String
+  property data : RedditComment | RedditLink | RedditMore | RedditListing
 end
 
 class RedditComment
+  include JSON::Serializable
+
+  property author : String
+  property body_html : String
+  property replies : RedditThing | String
+  property score : Int32
+  property depth : Int32
+  property permalink : String
+
+  @[JSON::Field(converter: RedditComment::TimeConverter)]
+  property created_utc : Time
+
   module TimeConverter
     def self.from_json(value : JSON::PullParser) : Time
       Time.unix(value.read_float.to_i)
@@ -15,51 +27,38 @@ class RedditComment
       json.number(value.to_unix)
     end
   end
-
-  JSON.mapping({
-    author:      String,
-    body_html:   String,
-    replies:     RedditThing | String,
-    score:       Int32,
-    depth:       Int32,
-    permalink:   String,
-    created_utc: {
-      type:      Time,
-      converter: RedditComment::TimeConverter,
-    },
-  })
 end
 
 struct RedditLink
-  JSON.mapping({
-    author:       String,
-    score:        Int32,
-    subreddit:    String,
-    num_comments: Int32,
-    id:           String,
-    permalink:    String,
-    title:        String,
-  })
+  include JSON::Serializable
+
+  property author : String
+  property score : Int32
+  property subreddit : String
+  property num_comments : Int32
+  property id : String
+  property permalink : String
+  property title : String
 end
 
 struct RedditMore
-  JSON.mapping({
-    children: Array(String),
-    count:    Int32,
-    depth:    Int32,
-  })
+  include JSON::Serializable
+
+  property children : Array(String)
+  property count : Int32
+  property depth : Int32
 end
 
 class RedditListing
-  JSON.mapping({
-    children: Array(RedditThing),
-    modhash:  String,
-  })
+  include JSON::Serializable
+
+  property children : Array(RedditThing)
+  property modhash : String
 end
 
-def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, sort_by = "top")
+def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, sort_by = "top", action = "action_get_comments")
   video = get_video(id, db, region: region)
-  session_token = video.info["session_token"]?
+  session_token = video.session_token
 
   case cursor
   when nil, ""
@@ -85,23 +84,20 @@ def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, so
     session_token: session_token,
   }
 
-  headers = HTTP::Headers.new
+  headers = HTTP::Headers{
+    "cookie" => video.cookie,
+  }
 
-  headers["content-type"] = "application/x-www-form-urlencoded"
-  headers["cookie"] = video.info["cookie"]
-
-  headers["x-client-data"] = "CIi2yQEIpbbJAQipncoBCNedygEIqKPKAQ=="
-  headers["x-spf-previous"] = "https://www.youtube.com/watch?v=#{id}&gl=US&hl=en&disable_polymer=1&has_verified=1&bpctr=9999999999"
-  headers["x-spf-referer"] = "https://www.youtube.com/watch?v=#{id}&gl=US&hl=en&disable_polymer=1&has_verified=1&bpctr=9999999999"
-
-  headers["x-youtube-client-name"] = "1"
-  headers["x-youtube-client-version"] = "2.20180719"
-
-  response = YT_POOL.client(region, &.post("/comment_service_ajax?action_get_comments=1&hl=en&gl=US", headers, form: post_req))
+  response = YT_POOL.client(region, &.post("/comment_service_ajax?#{action}=1&hl=en&gl=US&pbj=1", headers, form: post_req))
   response = JSON.parse(response.body)
 
+  # For some reason youtube puts it in an array for comment_replies but otherwise it's the same
+  if action == "action_get_comment_replies"
+    response = response[1]
+  end
+
   if !response["response"]["continuationContents"]?
-    raise translate(locale, "Could not fetch comments")
+    raise InfoException.new("Could not fetch comments")
   end
 
   response = response["response"]["continuationContents"]
@@ -150,8 +146,7 @@ def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, so
                 node_comment = node["commentRenderer"]
               end
 
-              content_html = node_comment["contentText"]["simpleText"]?.try &.as_s.rchop('\ufeff').try { |b| HTML.escape(b) }.to_s ||
-                             node_comment["contentText"]["runs"]?.try &.as_a.try { |r| content_to_comment_html(r).try &.to_s } || ""
+              content_html = node_comment["contentText"]?.try { |t| parse_content(t) } || ""
               author = node_comment["authorText"]?.try &.["simpleText"]? || ""
 
               json.field "author", author
@@ -205,8 +200,14 @@ def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, so
               end
 
               if node_replies && !response["commentRepliesContinuation"]?
-                reply_count = (node_replies["moreText"]["simpleText"]? || node_replies["moreText"]["runs"]?.try &.[0]?.try &.["text"]?)
-                  .try &.as_s.gsub(/\D/, "").to_i? || 1
+                if node_replies["moreText"]?
+                  reply_count = (node_replies["moreText"]["simpleText"]? || node_replies["moreText"]["runs"]?.try &.[0]?.try &.["text"]?)
+                    .try &.as_s.gsub(/\D/, "").to_i? || 1
+                elsif node_replies["viewReplies"]?
+                  reply_count = node_replies["viewReplies"]["buttonRenderer"]["text"]?.try &.["runs"][1]?.try &.["text"]?.try &.as_s.to_i? || 1
+                else
+                  reply_count = 1
+                end
 
                 continuation = node_replies["continuations"]?.try &.as_a[0]["nextContinuationData"]["continuation"].as_s
                 continuation ||= ""
@@ -225,14 +226,14 @@ def fetch_youtube_comments(id, db, cursor, format, locale, thin_mode, region, so
 
       if body["continuations"]?
         continuation = body["continuations"][0]["nextContinuationData"]["continuation"].as_s
-        json.field "continuation", cursor.try &.starts_with?("E") ? continuation : extract_comment_cursor(continuation)
+        json.field "continuation", continuation
       end
     end
   end
 
   if format == "html"
     response = JSON.parse(response)
-    content_html = template_youtube_comments(response, locale, thin_mode)
+    content_html = template_youtube_comments(response, locale, thin_mode, action == "action_get_comment_replies")
 
     response = JSON.build do |json|
       json.object do
@@ -252,7 +253,7 @@ end
 
 def fetch_reddit_comments(id, sort_by = "confidence")
   client = make_client(REDDIT_URL)
-  headers = HTTP::Headers{"User-Agent" => "web:invidious:v#{CURRENT_VERSION} (by /u/omarroth)"}
+  headers = HTTP::Headers{"User-Agent" => "web:invidious:v#{CURRENT_VERSION} (by github.com/iv-org/invidious)"}
 
   # TODO: Use something like #479 for a static list of instances to use here
   query = "(url:3D#{id}%20OR%20url:#{id})%20(site:invidio.us%20OR%20site:youtube.com%20OR%20site:youtu.be)"
@@ -276,14 +277,16 @@ def fetch_reddit_comments(id, sort_by = "confidence")
 
     thread = result[0].data.as(RedditListing).children[0].data.as(RedditLink)
   else
-    raise "Got error code #{search_results.status_code}"
+    raise InfoException.new("Could not fetch comments")
   end
+
+  client.close
 
   comments = result[1].data.as(RedditListing).children
   return comments, thread
 end
 
-def template_youtube_comments(comments, locale, thin_mode)
+def template_youtube_comments(comments, locale, thin_mode, is_replies = false)
   String.build do |html|
     root = comments["comments"].as_a
     root.each do |child|
@@ -294,7 +297,7 @@ def template_youtube_comments(comments, locale, thin_mode)
           <div class="pure-u-23-24">
             <p>
               <a href="javascript:void(0)" data-continuation="#{child["replies"]["continuation"]}"
-                onclick="get_youtube_replies(this)">#{translate(locale, "View `x` replies", number_with_separator(child["replies"]["replyCount"]))}</a>
+                data-onclick="get_youtube_replies" data-load-replies>#{translate(locale, "View `x` replies", number_with_separator(child["replies"]["replyCount"]))}</a>
             </p>
           </div>
         </div>
@@ -302,7 +305,7 @@ def template_youtube_comments(comments, locale, thin_mode)
       end
 
       if !thin_mode
-        author_thumbnail = "/ggpht#{URI.parse(child["authorThumbnails"][-1]["url"].as_s).full_path}"
+        author_thumbnail = "/ggpht#{URI.parse(child["authorThumbnails"][-1]["url"].as_s).request_target}"
       else
         author_thumbnail = ""
       end
@@ -330,7 +333,7 @@ def template_youtube_comments(comments, locale, thin_mode)
           html << <<-END_HTML
           <div class="pure-g">
             <div class="pure-u-1 pure-u-md-1-2">
-              <img style="width:100%" src="/ggpht#{URI.parse(attachment["url"].as_s).full_path}">
+              <img style="width:100%" src="/ggpht#{URI.parse(attachment["url"].as_s).request_target}">
             </div>
           </div>
           END_HTML
@@ -347,7 +350,7 @@ def template_youtube_comments(comments, locale, thin_mode)
             END_HTML
           else
             html << <<-END_HTML
-              <iframe id='ivplayer' type='text/html' style='position:absolute;width:100%;height:100%;left:0;top:0' src='/embed/#{attachment["videoId"]?}?autoplay=0' style='border:none;'></iframe>
+              <iframe id='ivplayer' style='position:absolute;width:100%;height:100%;left:0;top:0' src='/embed/#{attachment["videoId"]?}?autoplay=0' style='border:none;'></iframe>
             END_HTML
           end
 
@@ -356,6 +359,7 @@ def template_youtube_comments(comments, locale, thin_mode)
               </div>
             </div>
           END_HTML
+        else nil # Ignore
         end
       end
 
@@ -382,7 +386,7 @@ def template_youtube_comments(comments, locale, thin_mode)
 
       if child["creatorHeart"]?
         if !thin_mode
-          creator_thumbnail = "/ggpht#{URI.parse(child["creatorHeart"]["creatorThumbnail"].as_s).full_path}"
+          creator_thumbnail = "/ggpht#{URI.parse(child["creatorHeart"]["creatorThumbnail"].as_s).request_target}"
         else
           creator_thumbnail = ""
         end
@@ -413,7 +417,7 @@ def template_youtube_comments(comments, locale, thin_mode)
         <div class="pure-u-1">
           <p>
             <a href="javascript:void(0)" data-continuation="#{comments["continuation"]}"
-              onclick="get_youtube_replies(this, true)">#{translate(locale, "Load more")}</a>
+              data-onclick="get_youtube_replies" data-load-more #{"data-load-replies" if is_replies}>#{translate(locale, "Load more")}</a>
           </p>
         </div>
       </div>
@@ -451,7 +455,7 @@ def template_reddit_comments(root, locale)
 
         html << <<-END_HTML
         <p>
-          <a href="javascript:void(0)" onclick="toggle_parent(this)">[ - ]</a>
+          <a href="javascript:void(0)" data-onclick="toggle_parent">[ - ]</a>
           <b><a href="https://www.reddit.com/user/#{child.author}">#{child.author}</a></b>
           #{translate(locale, "`x` points", number_with_separator(child.score))}
           <span title="#{child.created_utc.to_s(translate(locale, "%a %B %-d %T %Y UTC"))}">#{translate(locale, "`x` ago", recode_date(child.created_utc, locale))}</span>
@@ -480,7 +484,7 @@ def replace_links(html)
         params = HTTP::Params.parse(url.query.not_nil!)
         anchor["href"] = params["q"]?
       else
-        anchor["href"] = url.full_path
+        anchor["href"] = url.request_target
       end
     elsif url.to_s == "#"
       begin
@@ -489,8 +493,12 @@ def replace_links(html)
         length_seconds = decode_time(anchor.content)
       end
 
-      anchor["href"] = "javascript:void(0)"
-      anchor["onclick"] = "player.currentTime(#{length_seconds})"
+      if length_seconds > 0
+        anchor["href"] = "javascript:void(0)"
+        anchor["onclick"] = "player.currentTime(#{length_seconds})"
+      else
+        anchor["href"] = url.request_target
+      end
     end
   end
 
@@ -522,13 +530,14 @@ def fill_links(html, scheme, host)
   return html.to_xml(options: XML::SaveOptions::NO_DECL)
 end
 
+def parse_content(content : JSON::Any) : String
+  content["simpleText"]?.try &.as_s.rchop('\ufeff').try { |b| HTML.escape(b) }.to_s ||
+    content["runs"]?.try &.as_a.try { |r| content_to_comment_html(r).try &.to_s } || ""
+end
+
 def content_to_comment_html(content)
   comment_html = content.map do |run|
-    text = HTML.escape(run["text"].as_s)
-
-    if run["text"] == "\n"
-      text = "<br>"
-    end
+    text = HTML.escape(run["text"].as_s).gsub("\n", "<br>")
 
     if run["bold"]?
       text = "<b>#{text}</b>"
@@ -546,7 +555,7 @@ def content_to_comment_html(content)
           if url.path == "/redirect"
             url = HTTP::Params.parse(url.query.not_nil!)["q"]
           else
-            url = url.full_path
+            url = url.request_target
           end
         end
 
@@ -555,8 +564,8 @@ def content_to_comment_html(content)
         length_seconds = watch_endpoint["startTimeSeconds"]?
         video_id = watch_endpoint["videoId"].as_s
 
-        if length_seconds
-          text = %(<a href="javascript:void(0)" onclick="player.currentTime(#{length_seconds})">#{text}</a>)
+        if length_seconds && length_seconds.as_i > 0
+          text = %(<a href="javascript:void(0)" data-onclick="jump_to_time" data-jump-time="#{length_seconds}">#{text}</a>)
         else
           text = %(<a href="/watch?v=#{video_id}">#{text}</a>)
         end
@@ -571,26 +580,20 @@ def content_to_comment_html(content)
   return comment_html
 end
 
-def extract_comment_cursor(continuation)
-  cursor = URI.decode_www_form(continuation)
-    .try { |i| Base64.decode(i) }
-    .try { |i| IO::Memory.new(i) }
-    .try { |i| Protodec::Any.parse(i) }
-    .try { |i| i["6:2:embedded"]["1:0:string"].as_s }
-
-  return cursor
-end
-
 def produce_comment_continuation(video_id, cursor = "", sort_by = "top")
   object = {
     "2:embedded" => {
       "2:string"    => video_id,
-      "24:varint"   => 1_i64,
-      "25:varint"   => 1_i64,
+      "25:varint"   => 0_i64,
       "28:varint"   => 1_i64,
       "36:embedded" => {
         "5:varint" => -1_i64,
         "8:varint" => 0_i64,
+      },
+      "40:embedded" => {
+        "1:varint" => 4_i64,
+        "3:string" => "https://www.youtube.com",
+        "4:string" => "",
       },
     },
     "3:varint"   => 6_i64,
@@ -609,6 +612,8 @@ def produce_comment_continuation(video_id, cursor = "", sort_by = "top")
     object["6:embedded"].as(Hash)["4:embedded"].as(Hash)["6:varint"] = 0_i64
   when "new", "newest"
     object["6:embedded"].as(Hash)["4:embedded"].as(Hash)["6:varint"] = 1_i64
+  else # top
+    object["6:embedded"].as(Hash)["4:embedded"].as(Hash)["6:varint"] = 0_i64
   end
 
   continuation = object.try { |i| Protodec::Any.cast_json(object) }

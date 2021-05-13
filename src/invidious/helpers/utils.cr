@@ -2,24 +2,29 @@ require "lsquic"
 require "pool/connection"
 
 def add_yt_headers(request)
-  request.headers["x-youtube-client-name"] ||= "1"
-  request.headers["x-youtube-client-version"] ||= "1.20180719"
   request.headers["user-agent"] ||= "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.97 Safari/537.36"
   request.headers["accept-charset"] ||= "ISO-8859-1,utf-8;q=0.7,*;q=0.7"
   request.headers["accept"] ||= "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
   request.headers["accept-language"] ||= "en-us,en;q=0.5"
-  request.headers["cookie"] = "#{(CONFIG.cookies.map { |c| "#{c.name}=#{c.value}" }).join("; ")}; #{request.headers["cookie"]?}"
+  return if request.resource.starts_with? "/sorry/index"
+  request.headers["x-youtube-client-name"] ||= "1"
+  request.headers["x-youtube-client-version"] ||= "2.20200609"
+  # Preserve original cookies and add new YT consent cookie for EU servers
+  request.headers["cookie"] = "#{request.headers["cookie"]?}; CONSENT=YES+"
+  if !CONFIG.cookies.empty?
+    request.headers["cookie"] = "#{(CONFIG.cookies.map { |c| "#{c.name}=#{c.value}" }).join("; ")}; #{request.headers["cookie"]?}"
+  end
 end
 
-struct QUICPool
+struct YoutubeConnectionPool
   property! url : URI
   property! capacity : Int32
   property! timeout : Float64
-  property pool : ConnectionPool(QUIC::Client)
+  property pool : ConnectionPool(QUIC::Client | HTTP::Client)
 
-  def initialize(url : URI, @capacity = 5, @timeout = 5.0)
+  def initialize(url : URI, @capacity = 5, @timeout = 5.0, use_quic = true)
     @url = url
-    @pool = build_pool
+    @pool = build_pool(use_quic)
   end
 
   def client(region = nil, &block)
@@ -45,9 +50,13 @@ struct QUICPool
     response
   end
 
-  private def build_pool
-    ConnectionPool(QUIC::Client).new(capacity: capacity, timeout: timeout) do
-      conn = QUIC::Client.new(url)
+  private def build_pool(use_quic)
+    ConnectionPool(QUIC::Client | HTTP::Client).new(capacity: capacity, timeout: timeout) do
+      if use_quic
+        conn = QUIC::Client.new(url)
+      else
+        conn = HTTP::Client.new(url)
+      end
       conn.family = (url.host == "www.youtube.com") ? CONFIG.force_resolve : Socket::Family::INET
       conn.family = Socket::Family::INET if conn.family == Socket::Family::UNSPEC
       conn.before_request { |r| add_yt_headers(r) } if url.host == "www.youtube.com"
@@ -77,8 +86,10 @@ def elapsed_text(elapsed)
 end
 
 def make_client(url : URI, region = nil)
-  client = HTTPClient.new(url)
+  # TODO: Migrate any applicable endpoints to QUIC
+  client = HTTPClient.new(url, OpenSSL::SSL::Context::Client.insecure)
   client.family = (url.host == "www.youtube.com") ? CONFIG.force_resolve : Socket::Family::UNSPEC
+  client.before_request { |r| add_yt_headers(r) } if url.host == "www.youtube.com"
   client.read_timeout = 10.seconds
   client.connect_timeout = 10.seconds
 
@@ -96,10 +107,19 @@ def make_client(url : URI, region = nil)
   return client
 end
 
+def make_client(url : URI, region = nil, &block)
+  client = make_client(url, region)
+  begin
+    yield client
+  ensure
+    client.close
+  end
+end
+
 def decode_length_seconds(string)
   length_seconds = string.gsub(/[^0-9:]/, "").split(":").map &.to_i
   length_seconds = [0] * (3 - length_seconds.size) + length_seconds
-  length_seconds = Time::Span.new(length_seconds[0], length_seconds[1], length_seconds[2])
+  length_seconds = Time::Span.new hours: length_seconds[0], minutes: length_seconds[1], seconds: length_seconds[2]
   length_seconds = length_seconds.total_seconds.to_i
 
   return length_seconds
@@ -161,6 +181,7 @@ def decode_date(string : String)
     return Time.utc
   when "yesterday"
     return Time.utc - 1.day
+  else nil # Continue
   end
 
   # String matches format "20 hours ago", "4 months ago"...
@@ -265,9 +286,9 @@ def arg_array(array, start = 1)
   return args
 end
 
-def make_host_url(config, kemal_config)
-  ssl = config.https_only || kemal_config.ssl
-  port = config.external_port || kemal_config.port
+def make_host_url(kemal_config)
+  ssl = CONFIG.https_only || kemal_config.ssl
+  port = CONFIG.external_port || kemal_config.port
 
   if ssl
     scheme = "https://"
@@ -282,11 +303,11 @@ def make_host_url(config, kemal_config)
     port = ""
   end
 
-  if !config.domain
+  if !CONFIG.domain
     return ""
   end
 
-  host = config.domain.not_nil!.lchop(".")
+  host = CONFIG.domain.not_nil!.lchop(".")
 
   return "#{scheme}#{host}#{port}"
 end
@@ -314,8 +335,8 @@ def get_referer(env, fallback = "/", unroll = true)
     end
   end
 
-  referer = referer.full_path
-  referer = "/" + referer.lstrip("\/\\")
+  referer = referer.request_target
+  referer = "/" + referer.gsub(/[^\/?@&%=\-_.0-9a-zA-Z]/, "").lstrip("/\\")
 
   if referer == env.request.path
     referer = fallback
@@ -324,50 +345,13 @@ def get_referer(env, fallback = "/", unroll = true)
   return referer
 end
 
-struct VarInt
-  def self.from_io(io : IO, format = IO::ByteFormat::NetworkEndian) : Int32
-    result = 0_u32
-    num_read = 0
-
-    loop do
-      byte = io.read_byte
-      raise "Invalid VarInt" if !byte
-      value = byte & 0x7f
-
-      result |= value.to_u32 << (7 * num_read)
-      num_read += 1
-
-      break if byte & 0x80 == 0
-      raise "Invalid VarInt" if num_read > 5
-    end
-
-    result.to_i32
-  end
-
-  def self.to_io(io : IO, value : Int32)
-    io.write_byte 0x00 if value == 0x00
-    value = value.to_u32
-
-    while value != 0
-      byte = (value & 0x7f).to_u8
-      value >>= 7
-
-      if value != 0
-        byte |= 0x80
-      end
-
-      io.write_byte byte
-    end
-  end
-end
-
 def sha256(text)
   digest = OpenSSL::Digest.new("SHA256")
   digest << text
-  return digest.hexdigest
+  return digest.final.hexstring
 end
 
-def subscribe_pubsub(topic, key, config)
+def subscribe_pubsub(topic, key)
   case topic
   when .match(/^UC[A-Za-z0-9_-]{22}$/)
     topic = "channel_id=#{topic}"
@@ -383,10 +367,8 @@ def subscribe_pubsub(topic, key, config)
   nonce = Random::Secure.hex(4)
   signature = "#{time}:#{nonce}"
 
-  host_url = make_host_url(config, Kemal.config)
-
   body = {
-    "hub.callback"      => "#{host_url}/feed/webhook/v1:#{time}:#{nonce}:#{OpenSSL::HMAC.hexdigest(:sha1, key, signature)}",
+    "hub.callback"      => "#{HOST_URL}/feed/webhook/v1:#{time}:#{nonce}:#{OpenSSL::HMAC.hexdigest(:sha1, key, signature)}",
     "hub.topic"         => "https://www.youtube.com/xml/feeds/videos.xml?#{topic}",
     "hub.verify"        => "async",
     "hub.mode"          => "subscribe",
@@ -394,7 +376,7 @@ def subscribe_pubsub(topic, key, config)
     "hub.secret"        => key.to_s,
   }
 
-  return make_client(PUBSUB_URL).post("/subscribe", form: body)
+  return make_client(PUBSUB_URL, &.post("/subscribe", form: body))
 end
 
 def parse_range(range)
